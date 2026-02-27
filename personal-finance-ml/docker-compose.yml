@@ -1,0 +1,30 @@
+version: '3.8'
+
+services:
+  web:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=1
+      - DJANGO_ALLOWED_HOSTS=localhost 127.0.0.1 [::1]
+      
+      # NOTE: For PostgreSQL in development, you can uncomment this `db` service 
+      # and configure the `DATABASE_URL` appropriately, but since this project 
+      # heavily utilizes the local `db.sqlite3` and joblib ML models, running 
+      # the web service directly is the easiest way to test everything via Docker.
+
+  # db:
+  #   image: postgres:15
+  #   volumes:
+  #     - postgres_data:/var/lib/postgresql/data/
+  #   environment:
+  #     - POSTGRES_USER=postgres
+  #     - POSTGRES_PASSWORD=postgres
+  #     - POSTGRES_DB=personal_finance_ml
+
+# volumes:
+#   postgres_data:
