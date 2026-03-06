@@ -20,6 +20,6 @@ class ExpenseSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'user', 'category', 'category_detail', 'amount', 
             'description', 'timestamp', 'is_ml_predicted', 'prediction_log',
-            'is_anomaly', 'risk_score'
+            'is_anomaly', 'risk_score', 'needs_review'
         ]
-        read_only_fields = ['user', 'is_ml_predicted', 'is_anomaly', 'risk_score']
+        read_only_fields = ['user', 'is_anomaly', 'risk_score']

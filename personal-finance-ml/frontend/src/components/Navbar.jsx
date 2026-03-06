@@ -1,10 +1,22 @@
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useNavigate, Link } from 'react-router-dom';
-import { LogOut, Activity, PlusCircle, PieChart } from 'lucide-react';
+import { LogOut, Activity, PlusCircle, PieChart, User, Sun, Moon } from 'lucide-react';
 
 export default function Navbar() {
     const { logout } = useAuth();
     const navigate = useNavigate();
+
+    const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+
+    useEffect(() => {
+        document.documentElement.setAttribute('data-theme', theme);
+        localStorage.setItem('theme', theme);
+    }, [theme]);
+
+    const toggleTheme = () => {
+        setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+    };
 
     const handleLogout = () => {
         logout();
@@ -30,6 +42,9 @@ export default function Navbar() {
                 </Link>
 
                 <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                    <Link to="/profile" className="btn btn-secondary" style={{ border: 'none', padding: '0.5rem 1rem' }}>
+                        <User size={18} /> Profile
+                    </Link>
                     <Link to="/analytics" className="btn btn-secondary" style={{ border: 'none', padding: '0.5rem 1rem' }}>
                         <PieChart size={18} /> Dashboard
                     </Link>
@@ -40,7 +55,10 @@ export default function Navbar() {
                         <PlusCircle size={18} /> New Expense
                     </button>
                     <div style={{ width: '1px', height: '24px', background: 'var(--border-light)', margin: '0 0.5rem' }}></div>
-                    <button onClick={handleLogout} className="btn btn-secondary" style={{ border: 'none', padding: '0.5rem', color: 'var(--text-secondary)' }}>
+                    <button onClick={toggleTheme} className="btn btn-secondary" style={{ border: 'none', padding: '0.5rem', color: 'var(--text-secondary)' }} title="Toggle Theme">
+                        {theme === 'dark' ? <Sun size={20} /> : <Moon size={20} />}
+                    </button>
+                    <button onClick={handleLogout} className="btn btn-secondary" style={{ border: 'none', padding: '0.5rem', color: 'var(--text-secondary)' }} title="Logout">
                         <LogOut size={20} />
                     </button>
                 </div>

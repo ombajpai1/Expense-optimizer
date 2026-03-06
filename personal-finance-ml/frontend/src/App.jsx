@@ -5,6 +5,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import Dashboard from './pages/Dashboard';
 import Analytics from './pages/Analytics';
+import Profile from './pages/Profile';
 
 function App() {
   return (
@@ -19,6 +20,7 @@ function App() {
           <Route element={<ProtectedLayout />}>
             <Route path="/" element={<Dashboard />} />
             <Route path="/analytics" element={<Analytics />} />
+            <Route path="/profile" element={<Profile />} />
           </Route>
 
           {/* Fallback */}

@@ -1,9 +1,11 @@
 from rest_framework import viewsets, status
+from rest_framework.decorators import action
 from rest_framework.response import Response
 from .models import Category, Expense, MLPredictionLog
 from .serializers import CategorySerializer, ExpenseSerializer
 from ml_engine.services import predict_category, detect_anomaly
 from django.contrib.auth import get_user_model
+from drf_spectacular.utils import extend_schema, extend_schema_view, OpenApiParameter, OpenApiTypes
 
 User = get_user_model()
 
@@ -11,6 +13,17 @@ class CategoryViewSet(viewsets.ModelViewSet):
     queryset = Category.objects.all()
     serializer_class = CategorySerializer
 
+@extend_schema_view(
+    list=extend_schema(summary="List all Expenses", description="Retrieves a list of all expenses for the authenticated user, ordered by most recent first."),
+    create=extend_schema(
+        summary="Create & Analyze Expense", 
+        description="Creates an expense record. The transaction is instantly passed through the ML Pipeline. The RandomForest Classifier auto-assigns a category based on the description, and the Isolation Forest calculates a risk_score to flag anomalous overspending."
+    ),
+    retrieve=extend_schema(summary="Retrieve Expense Detail"),
+    update=extend_schema(summary="Update Expense"),
+    partial_update=extend_schema(summary="Partially Update Expense"),
+    destroy=extend_schema(summary="Delete Expense")
+)
 class ExpenseViewSet(viewsets.ModelViewSet):
     serializer_class = ExpenseSerializer
 
@@ -24,37 +37,53 @@ class ExpenseViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         # We know user is authenticated because of project settings
         user = self.request.user
-            
-        expense = serializer.save(user=user)
+        
+        # Human-in-the-Loop Override
+        category_id_param = self.request.data.get('category_id')
+        explicit_category = None
+        
+        if category_id_param and str(category_id_param) != "Auto":
+            try:
+                explicit_category = Category.objects.get(id=category_id_param)
+            except Category.DoesNotExist:
+                pass
+                
+        if explicit_category:
+            expense = serializer.save(user=user, category=explicit_category, is_ml_predicted=False)
+        else:
+            expense = serializer.save(user=user)
 
         # Non-blocking ML integration
         try:
-            # Predict Category
-            cat_result = predict_category(expense.description, float(expense.amount))
-            category_id = cat_result.get('category_id')
-            confidence = cat_result.get('confidence_score', 0.0)
+            # Predict Category Only if not explicitly provided
+            if not explicit_category:
+                cat_result = predict_category(expense.description, float(expense.amount))
+                predicted_category_id = cat_result.get('category_id')
+                confidence = cat_result.get('confidence_score', 0.0)
 
-            # Detect Anomaly Risk
-            ano_result = detect_anomaly(expense.description, float(expense.amount))
+                if predicted_category_id:
+                    try:
+                        predicted_category = Category.objects.get(id=predicted_category_id)
+                        if not expense.category:
+                            expense.category = predicted_category
+                            expense.is_ml_predicted = True
+                            if confidence < 0.75:
+                                expense.needs_review = True
+                            expense.save(update_fields=['category', 'is_ml_predicted', 'needs_review'])
+                        
+                        # Log prediction
+                        MLPredictionLog.objects.create(
+                            expense=expense,
+                            confidence_score=confidence,
+                            user_overridden=(expense.category != predicted_category)
+                        )
+                    except Category.DoesNotExist:
+                        pass
+
+            # Detect Anomaly Risk with Budget Mapping (Passing the whole expense object)
+            ano_result = detect_anomaly(expense)
             expense.is_anomaly = ano_result.get('is_anomaly', False)
             expense.risk_score = ano_result.get('risk_score', 0.0)
-
-            # Assign category if we have one and user didn't explicitly pick one
-            if category_id:
-                try:
-                    predicted_category = Category.objects.get(id=category_id)
-                    if not expense.category:
-                        expense.category = predicted_category
-                        expense.is_ml_predicted = True
-                    
-                    # Log prediction
-                    MLPredictionLog.objects.create(
-                        expense=expense,
-                        confidence_score=confidence,
-                        user_overridden=(expense.category != predicted_category)
-                    )
-                except Category.DoesNotExist:
-                    pass
             
             # Save the final mutated expense with anomaly data
             expense.save()
@@ -62,3 +91,77 @@ class ExpenseViewSet(viewsets.ModelViewSet):
         except Exception as e:
             # Let it fail silently to keep it non-blocking
             pass
+
+    @extend_schema(
+        summary="Get ML Comparison Stats (Clarity Chart)",
+        description="Generates the payload for the Clarity Chart. Compares the user's actual spending in the given month against the mathematically Optimized Limits generated by the RandomForestRegressor. It also returns actionable AI Coaching insights.",
+        parameters=[
+            OpenApiParameter(name='year', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, description='Target Year (e.g. 2024)', required=False),
+            OpenApiParameter(name='month', type=OpenApiTypes.INT, location=OpenApiParameter.QUERY, description='Target Month (1-12)', required=False)
+        ]
+    )
+    @action(detail=False, methods=['get'], url_path='comparison-stats')
+    def comparison_stats(self, request):
+        """Returns JSON comparing Actual Spend vs Optimized Limits for a given Month/Year."""
+        user = request.user
+        year = request.query_params.get('year')
+        month = request.query_params.get('month')
+        
+        from datetime import datetime
+        now = datetime.now()
+        try:
+            year = int(year) if year else now.year
+            month = int(month) if month else now.month
+        except ValueError:
+            return Response({"error": "Invalid year or month format"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Get actual spend for the month per category
+        from django.db.models import Sum
+        expenses = Expense.objects.filter(
+            user=user,
+            timestamp__year=year,
+            timestamp__month=month,
+            category__isnull=False
+        ).values('category__name').annotate(total=Sum('amount'))
+        
+        actual_spend = {item['category__name']: float(item['total']) for item in expenses}
+        
+        # Get target limits from Regressor
+        from ml_engine.services import get_optimized_budget
+        target_limits = get_optimized_budget(user.profile) if hasattr(user, 'profile') else {}
+        
+        # Build comparison
+        categories = Category.objects.values_list('name', flat=True)
+        comparison = []
+        for cat in categories:
+            actual = actual_spend.get(cat, 0.0)
+            optimized = target_limits.get(cat, 0.0)
+            comparison.append({
+                'category': cat,
+                'actual_spent': actual,
+                'optimized_limit': optimized,
+                'status': 'Danger' if actual > optimized else 'Safe'
+            })
+            
+        # Optional: savings goals aggregate
+        monthly_salary = float(user.profile.monthly_salary) if hasattr(user, 'profile') else 0.0
+        savings_target_pct = float(user.profile.savings_target_percentage) if hasattr(user, 'profile') else 20.0
+        total_spent = sum(actual_spend.values())
+        current_savings = max(0.0, monthly_salary - total_spent)
+        # Generate AI Action Items
+        from ml_engine.insights import generate_action_items
+        ai_insights = generate_action_items(comparison, profile=getattr(user, 'profile', None))
+        
+        return Response({
+            'year': year, 
+            'month': month, 
+            'comparison': comparison,
+            'ai_insights': ai_insights,
+            'summary': {
+                'monthly_salary': monthly_salary,
+                'total_spent': total_spent,
+                'current_savings': current_savings,
+                'savings_target_amount': monthly_salary * (savings_target_pct / 100),
+                'savings_target_percentage': savings_target_pct
+            }
+        }, status=status.HTTP_200_OK)

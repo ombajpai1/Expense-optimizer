@@ -7,79 +7,97 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.preprocessing import StandardScaler
-from sklearn.ensemble import RandomForestClassifier, IsolationForest
+from sklearn.ensemble import RandomForestClassifier, IsolationForest, RandomForestRegressor
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, mean_absolute_error
 
-# Setup Django environment so we can access models
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "core.settings")
-django.setup()
-
-from expenses.models import Category
-
+# Standalone ML training, completely decoupled from local database IDs
 import random
 
 def generate_sample_data():
-    """Generate dummy data for training the model if the DB is empty."""
-    print("Generating Sample Data...")
+    """Generate dummy data containing Profile Demographics and New Categories."""
+    print("Generating Optimization Sample Data...")
     
-    # Pre-populate Categories if they don't exist
-    category_names = ["Groceries", "Transport", "Entertainment", "Utilities", "Dining Out"]
-    categories = {}
-    for name in category_names:
-        cat, _ = Category.objects.get_or_create(name=name)
-        categories[name] = cat.id
+    # 1. Standardized Tags (Strings only, no DB lookup)
+    category_names = ["Rent", "EMI", "Food", "Utilities", "Education", "Recreation"]
 
+    # 2. Base Data with Demographic Contexts
+    # Format: description, amount, category_id, monthly_salary, city_tier
     base_data = [
-        {"description": "Reliance Smart", "amount": 1500.25, "category_id": categories["Groceries"]},
-        {"description": "Big Bazaar", "amount": 3850.00, "category_id": categories["Groceries"]},
-        {"description": "D-Mart", "amount": 2242.10, "category_id": categories["Groceries"]},
-        {"description": "Uber ride to airport", "amount": 835.50, "category_id": categories["Transport"]},
-        {"description": "Ola Cabs", "amount": 314.20, "category_id": categories["Transport"]},
-        {"description": "Indian Oil Petrol", "amount": 2045.00, "category_id": categories["Transport"]},
-        {"description": "Netflix Subscription", "amount": 649.00, "category_id": categories["Entertainment"]},
-        {"description": "PVR Cinemas", "amount": 1032.50, "category_id": categories["Entertainment"]},
-        {"description": "Spotify Premium", "amount": 119.00, "category_id": categories["Entertainment"]},
-        {"description": "Electricity Bill", "amount": 3120.00, "category_id": categories["Utilities"]},
-        {"description": "Water Utility", "amount": 445.00, "category_id": categories["Utilities"]},
-        {"description": "Airtel Broadband", "amount": 980.00, "category_id": categories["Utilities"]},
-        {"description": "Starbucks Coffee", "amount": 455.50, "category_id": categories["Dining Out"]},
-        {"description": "McDonalds", "amount": 512.40, "category_id": categories["Dining Out"]},
-        {"description": "Local Dhaba", "amount": 865.00, "category_id": categories["Dining Out"]},
+        # Rent (Scales with Tier)
+        {"description": "Monthly Flat Rent", "amount": 25000, "category_id": "Rent", "monthly_salary": 80000, "city_tier": 1},
+        {"description": "Hostel Rent", "amount": 8000, "category_id": "Rent", "monthly_salary": 40000, "city_tier": 2},
+        {"description": "Village House Rent", "amount": 3000, "category_id": "Rent", "monthly_salary": 20000, "city_tier": 3},
+        
+        # EMI (Scales with Salary)
+        {"description": "Car Loan EMI", "amount": 15000, "category_id": "EMI", "monthly_salary": 90000, "city_tier": 1},
+        {"description": "Bike EMI", "amount": 3500, "category_id": "EMI", "monthly_salary": 35000, "city_tier": 2},
+        {"description": "Home Loan EMI", "amount": 35000, "category_id": "EMI", "monthly_salary": 180000, "city_tier": 1},
+        
+        # Food (Scales with Tier)
+        {"description": "Zomato Delivery", "amount": 850, "category_id": "Food", "monthly_salary": 60000, "city_tier": 1},
+        {"description": "Swiggy Order", "amount": 650, "category_id": "Food", "monthly_salary": 60000, "city_tier": 1},
+        {"description": "Blinkit Groceries", "amount": 1200, "category_id": "Food", "monthly_salary": 60000, "city_tier": 1},
+        {"description": "Zepto Quick Delivery", "amount": 400, "category_id": "Food", "monthly_salary": 60000, "city_tier": 1},
+        {"description": "D-Mart Groceries", "amount": 4200, "category_id": "Food", "monthly_salary": 50000, "city_tier": 2},
+        {"description": "Local Veg Market", "amount": 450, "category_id": "Food", "monthly_salary": 25000, "city_tier": 3},
+        
+        # Utilities
+        {"description": "Electricity Bill", "amount": 2800, "category_id": "Utilities", "monthly_salary": 70000, "city_tier": 1},
+        {"description": "Water Board Bill", "amount": 450, "category_id": "Utilities", "monthly_salary": 70000, "city_tier": 1},
+        {"description": "Jio Fiber Broadband", "amount": 999, "category_id": "Utilities", "monthly_salary": 45000, "city_tier": 2},
+        {"description": "Mobile Recharge Airtel", "amount": 350, "category_id": "Utilities", "monthly_salary": 20000, "city_tier": 3},
+        
+        # Education
+        {"description": "Udemy Course", "amount": 499, "category_id": "Education", "monthly_salary": 50000, "city_tier": 2},
+        {"description": "Coursera Certification", "amount": 3500, "category_id": "Education", "monthly_salary": 70000, "city_tier": 1},
+        {"description": "EdX Learning", "amount": 8000, "category_id": "Education", "monthly_salary": 90000, "city_tier": 1},
+        {"description": "Khan Academy Donation", "amount": 1000, "category_id": "Education", "monthly_salary": 60000, "city_tier": 2},
+        {"description": "Udacity Nanodegree", "amount": 15000, "category_id": "Education", "monthly_salary": 120000, "city_tier": 1},
+        {"description": "Math Tuition Fee", "amount": 2000, "category_id": "Education", "monthly_salary": 40000, "city_tier": 2},
+        {"description": "College Tuition Fee", "amount": 45000, "category_id": "Education", "monthly_salary": 120000, "city_tier": 1},
+        
+        # Recreation
+        {"description": "Netflix Premium", "amount": 649, "category_id": "Recreation", "monthly_salary": 65000, "city_tier": 1},
+        {"description": "Amazon Prime Subscription", "amount": 1499, "category_id": "Recreation", "monthly_salary": 65000, "city_tier": 1},
+        {"description": "PVR Movie Tickets", "amount": 950, "category_id": "Recreation", "monthly_salary": 40000, "city_tier": 2},
+        {"description": "BookMyShow Event", "amount": 2500, "category_id": "Recreation", "monthly_salary": 80000, "city_tier": 1},
+        {"description": "Weekend Goa Trip", "amount": 12000, "category_id": "Recreation", "monthly_salary": 85000, "city_tier": 1},
     ]
-    
-    # Generate 1000 normal items with slight noise so the model learns a dense cluster
+
+    # Generate 15000 normal transactions
     normal_data = []
-    for _ in range(1000):
+    for _ in range(15000):
         item = random.choice(base_data).copy()
-        # Add random noise +- 20%
-        item["amount"] = item["amount"] * random.uniform(0.8, 1.2)
+        item["amount"] = item["amount"] * random.uniform(0.85, 1.15) # Noise
         normal_data.append(item)
 
-    # Inject 5 extreme anomalies (e.g. ₹80k+) that we FORCE the Isolation Forest to recognize as -1
+    # Inject Extreme Anomalies mapping extreme behavior relative to their contexts
     anomaly_data = [
-        {"description": "Massive Party", "amount": 150000.00, "category_id": categories["Dining Out"]},
-        {"description": "Huge Flight Tickets", "amount": 85000.00, "category_id": categories["Transport"]},
-        {"description": "Insane Electronics Bill", "amount": 250000.00, "category_id": categories["Utilities"]},
-        {"description": "Mega Shopping Mall", "amount": 90000.00, "category_id": categories["Groceries"]},
-        {"description": "Crazy 5 Star Hotel", "amount": 120000.00, "category_id": categories["Dining Out"]},
+        # Tier 3 user blowing 6 months salary on Rent
+        {"description": "Luxury Villa Rent", "amount": 150000, "category_id": "Rent", "monthly_salary": 25000, "city_tier": 3},
+        # Tier 2 user buying 5 iPhones 
+        {"description": "Massive Electronics EMI", "amount": 350000, "category_id": "EMI", "monthly_salary": 50000, "city_tier": 2},
+        # Tier 1 user dropping insane money on a single dinner
+        {"description": "Insane 5 Star Hotel Party", "amount": 95000, "category_id": "Food", "monthly_salary": 100000, "city_tier": 1},
     ]
 
     return pd.DataFrame(normal_data + anomaly_data)
 
+
 def train_model():
     df = generate_sample_data()
-    print(f"Dataset shape: {df.shape}")
+    print(f"Classification Dataset shape: {df.shape}")
     
-    X = df[['description', 'amount']]
-    y = df['category_id']
+    # Text Categorization (Only needs description and amount)
+    X_clf = df[['description', 'amount']]
+    y_clf = df['category_id'].astype(str)
 
     # Split dataset for classifier
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+    X_train, X_test, y_train, y_test = train_test_split(X_clf, y_clf, test_size=0.2, random_state=42)
 
-    # 1. Preprocessor
-    preprocessor = ColumnTransformer(
+    # 1. Preprocessor for Categorizer
+    clf_preprocessor = ColumnTransformer(
         transformers=[
             ('text', TfidfVectorizer(stop_words='english', ngram_range=(1, 2)), 'description'),
             ('num', StandardScaler(), ['amount'])
@@ -88,7 +106,7 @@ def train_model():
 
     # 2. Classifier Pipeline
     clf_pipeline = Pipeline(steps=[
-        ('preprocessor', preprocessor),
+        ('preprocessor', clf_preprocessor),
         ('classifier', RandomForestClassifier(n_estimators=100, random_state=42))
     ])
 
@@ -99,25 +117,28 @@ def train_model():
     y_pred = clf_pipeline.predict(X_test)
     print(classification_report(y_test, y_pred))
 
-    from sklearn.preprocessing import RobustScaler
+    from sklearn.preprocessing import RobustScaler, OneHotEncoder
 
-    # 3. Anomaly Detection Pipeline
-    # Use RobustScaler for anomalies so the massive outliers don't warp the distribution range
+    # Anomaly Detection (Needs deep context: amount, salary, tier)
+    X_ano = df[['description', 'amount', 'monthly_salary', 'city_tier']]
+    
+    # 3. Anomaly Detection Pipeline (Factoring in Salary & Tier)
     anomaly_preprocessor = ColumnTransformer(
         transformers=[
             ('text', TfidfVectorizer(stop_words='english', ngram_range=(1, 2)), 'description'),
-            ('num', RobustScaler(), ['amount'])
+            ('num_robust', RobustScaler(), ['amount', 'monthly_salary']),
+            ('cat', OneHotEncoder(handle_unknown='ignore'), ['city_tier'])
         ]
     )
 
     anomaly_pipeline = Pipeline(steps=[
         ('preprocessor', anomaly_preprocessor), 
-        # Set contamination to 0.05
         ('isolation_forest', IsolationForest(contamination=0.05, random_state=42)) 
     ])
     
-    print("Training Anomaly Detector (Isolation Forest)...")
-    anomaly_pipeline.fit(X)
+    print("Training Demographic Anomaly Detector (Isolation Forest)...")
+    anomaly_pipeline.fit(X_ano)
+
 
     # 4. Save the Models
     models_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'models')

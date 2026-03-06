@@ -1,6 +1,7 @@
 import { Outlet, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
+import WelcomeModal from '../components/WelcomeModal';
 
 export default function ProtectedLayout() {
     const { isAuthenticated, loading } = useAuth();
@@ -20,6 +21,7 @@ export default function ProtectedLayout() {
     return (
         <div className="app-layout">
             <Navbar />
+            <WelcomeModal />
             <main className="container" style={{ padding: '2rem 1.5rem', marginTop: '1rem' }}>
                 <Outlet />
             </main>
