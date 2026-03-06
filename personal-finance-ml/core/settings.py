@@ -28,8 +28,8 @@ SECRET_KEY = 'django-insecure-zvfn3cittakc84cj0w*hm&*kt4i9jw#veffhm#ysaao+gqgiav
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-# ALLOWED_HOSTS = []
-ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
+ALLOWED_HOSTS = ['expense-optimizer.onrender.com', 'localhost', '127.0.0.1']
+# ALLOWED_HOSTS = os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1").split(",")
 
 # Application definition
 
